@@ -1,0 +1,776 @@
+-- Apocalypse Rising 2 ESP Script
+-- Includes: Zombie ESP, Vehicle ESP, Container ESP with Empty/Full Detection
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- Create ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "Apoc2ESP"
+ScreenGui.ResetOnSpawn = false
+
+pcall(function()
+    ScreenGui.Parent = game:GetService("CoreGui")
+end)
+
+if not ScreenGui.Parent then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 300, 0, 400)
+MainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(150, 0, 0)
+MainStroke.Thickness = 2
+MainStroke.Parent = MainFrame
+
+-- Title Bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 50)
+TitleBar.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 12)
+TitleCorner.Parent = TitleBar
+
+local TitleFix = Instance.new("Frame")
+TitleFix.Size = UDim2.new(1, 0, 0, 25)
+TitleFix.Position = UDim2.new(0, 0, 1, -25)
+TitleFix.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+TitleFix.BorderSizePixel = 0
+TitleFix.Parent = TitleBar
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -100, 1, 0)
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "🧟 APOC 2 ESP+"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 20
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+-- Close Button
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 35, 0, 35)
+CloseButton.Position = UDim2.new(1, -42, 0, 7.5)
+CloseButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.TextSize = 18
+CloseButton.Parent = TitleBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 8)
+CloseCorner.Parent = CloseButton
+
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+-- Content Frame
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, -20, 1, -65)
+ContentFrame.Position = UDim2.new(0, 10, 0, 60)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+-- ESP Storage
+local zombieESPObjects = {}
+local vehicleESPObjects = {}
+local containerESPObjects = {}
+
+-- Features
+local features = {
+    zombieESP = false,
+    vehicleESP = false,
+    containerESP = false,
+    debugMode = false
+}
+
+-- Helper function to check if object is part of a player
+local function isPartOfPlayer(obj)
+    -- Check if it's an accessory
+    if obj:IsA("Accessory") or obj:FindFirstAncestorOfClass("Accessory") then
+        return true
+    end
+    
+    -- Check if any parent is a player character
+    local current = obj
+    while current and current ~= Workspace do
+        if Players:GetPlayerFromCharacter(current) then
+            return true
+        end
+        
+        -- Check for character body parts
+        local name = current.Name
+        if name == "Head" or name == "Torso" or name == "UpperTorso" or 
+           name == "LowerTorso" or name == "HumanoidRootPart" or
+           name == "Left Arm" or name == "Right Arm" or 
+           name == "Left Leg" or name == "Right Leg" or
+           name:find("Arm") or name:find("Leg") or name:find("Hand") or name:find("Foot") then
+            return true
+        end
+        
+        current = current.Parent
+    end
+    
+    -- Check if it has a Humanoid (character model)
+    if obj:FindFirstChildOfClass("Humanoid") then
+        return true
+    end
+    
+    -- Check if it's inside a player's backpack or character
+    local parent = obj.Parent
+    if parent then
+        local parentName = parent.Name:lower()
+        if parentName == "backpack" or parentName == "character" then
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- Helper function to check if container is actually lootable
+local function isLootableContainer(obj)
+    -- Must have NumberValue children (loot categories)
+    local hasNumberValues = false
+    local numberValueCount = 0
+    
+    for _, child in pairs(obj:GetChildren()) do
+        if child:IsA("NumberValue") or child:IsA("IntValue") then
+            -- Check if it looks like a loot category (not generic values like health, speed, etc.)
+            local name = child.Name:lower()
+            if not name:find("health") and not name:find("damage") and 
+               not name:find("speed") and not name:find("time") and
+               not name:find("rotation") and not name:find("position") then
+                hasNumberValues = true
+                numberValueCount = numberValueCount + 1
+            end
+        end
+    end
+    
+    -- AR2 loot containers typically have multiple NumberValue children (loot categories)
+    -- If it has 2+ NumberValues, it's likely a loot container
+    if numberValueCount >= 2 then
+        return true
+    end
+    
+    return false
+end
+
+-- Helper function to check if container has loot
+local function checkContainerContents(container)
+    local totalItemCount = 0
+    
+    -- AR2 spawns actual item models inside containers
+    -- Look for Tool objects or Models that are items
+    for _, child in pairs(container:GetDescendants()) do
+        -- Method 1: Check for Tool objects (weapons, items)
+        if child:IsA("Tool") then
+            totalItemCount = totalItemCount + 1
+            if features.debugMode then
+                print("[LOOT FOUND] " .. container.Name .. " contains Tool: " .. child.Name)
+            end
+        end
+        
+        -- Method 2: Check for Accessory objects (clothing, backpacks, gear)
+        if child:IsA("Accessory") and not isPartOfPlayer(child) then
+            totalItemCount = totalItemCount + 1
+            if features.debugMode then
+                print("[LOOT FOUND] " .. container.Name .. " contains Accessory: " .. child.Name)
+            end
+        end
+        
+        -- Method 3: Check for Models that look like items
+        if child:IsA("Model") and child ~= container then
+            local name = child.Name:lower()
+            -- Check if it has item-like keywords
+            if name:find("backpack") or name:find("weapon") or name:find("gun") or 
+               name:find("rifle") or name:find("pistol") or name:find("item") or
+               name:find("ammo") or name:find("mag") or name:find("medkit") or
+               name:find("bandage") or name:find("food") or name:find("drink") or
+               name:find("vest") or name:find("helmet") or name:find("gear") or
+               name:find("clothing") or name:find("hatchet") or name:find("axe") or
+               name:find("knife") or name:find("bat") then
+                -- Make sure it's not a spawn point or geometry
+                if not name:find("spawn") and not name:find("geometry") and 
+                   not name:find("collision") and not name:find("point") then
+                    totalItemCount = totalItemCount + 1
+                    if features.debugMode then
+                        print("[LOOT FOUND] " .. container.Name .. " contains Model: " .. child.Name)
+                    end
+                end
+            end
+        end
+        
+        -- Method 4: Check for MeshPart items (some items might be single parts)
+        if child:IsA("MeshPart") or child:IsA("Part") then
+            local name = child.Name:lower()
+            if name:find("backpack") or name:find("weapon") or name:find("item") then
+                -- Make sure it has a parent that's not just "Geometry"
+                if child.Parent and child.Parent.Name ~= "Geometry" and child.Parent ~= container then
+                    totalItemCount = totalItemCount + 1
+                    if features.debugMode then
+                        print("[LOOT FOUND] " .. container.Name .. " contains Part: " .. child.Name)
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Debug output
+    if features.debugMode then
+        print("[CONTAINER CHECK] " .. container.Name .. " | Total Items Found: " .. totalItemCount)
+    end
+    
+    if totalItemCount > 0 then
+        return true, totalItemCount
+    else
+        return false, 0
+    end
+end
+
+-- Button creator
+local yPos = 0
+local function createButton(text, callback)
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1, 0, 0, 50)
+    Button.Position = UDim2.new(0, 0, 0, yPos)
+    Button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Button.Text = text
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.Font = Enum.Font.Gotham
+    Button.TextSize = 15
+    Button.Parent = ContentFrame
+    
+    local ButtonCorner = Instance.new("UICorner")
+    ButtonCorner.CornerRadius = UDim.new(0, 10)
+    ButtonCorner.Parent = Button
+    
+    local ButtonStroke = Instance.new("UIStroke")
+    ButtonStroke.Color = Color3.fromRGB(70, 70, 70)
+    ButtonStroke.Thickness = 2
+    ButtonStroke.Parent = Button
+    
+    Button.MouseButton1Click:Connect(function()
+        callback(Button)
+    end)
+    
+    yPos = yPos + 60
+    return Button
+end
+
+-- Helper function to get character
+local function getCharacter()
+    return LocalPlayer.Character
+end
+
+-- Zombie ESP
+createButton("🧟 Zombie ESP: OFF", function(btn)
+    features.zombieESP = not features.zombieESP
+    if features.zombieESP then
+        btn.Text = "🧟 Zombie ESP: ON"
+        btn.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+        
+        spawn(function()
+            while features.zombieESP do
+                local char = getCharacter()
+                if char then
+                    pcall(function()
+                        for _, obj in pairs(Workspace:GetChildren()) do
+                            if obj:IsA("Model") and obj ~= char then
+                                local name = obj.Name:lower()
+                                local isPlayer = Players:GetPlayerFromCharacter(obj)
+                                local hasHumanoid = obj:FindFirstChildOfClass("Humanoid")
+                                
+                                local isZombie = (hasHumanoid and not isPlayer) or name:find("zombie") or name:find("infected")
+                                
+                                if isZombie and not obj:FindFirstChild("ZombieESP_H") then
+                                    local highlight = Instance.new("Highlight")
+                                    highlight.Name = "ZombieESP_H"
+                                    highlight.FillColor = Color3.fromRGB(255, 100, 0)
+                                    highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+                                    highlight.FillTransparency = 0.5
+                                    highlight.OutlineTransparency = 0
+                                    highlight.Parent = obj
+                                    table.insert(zombieESPObjects, highlight)
+                                    
+                                    local head = obj:FindFirstChild("Head") or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
+                                    if head and head:IsA("BasePart") then
+                                        local billboard = Instance.new("BillboardGui")
+                                        billboard.Name = "ZombieESP_L"
+                                        billboard.Size = UDim2.new(0, 150, 0, 50)
+                                        billboard.StudsOffset = Vector3.new(0, 3, 0)
+                                        billboard.AlwaysOnTop = true
+                                        billboard.Parent = head
+                                        table.insert(zombieESPObjects, billboard)
+                                        
+                                        local label = Instance.new("TextLabel")
+                                        label.Size = UDim2.new(1, 0, 1, 0)
+                                        label.BackgroundTransparency = 0.3
+                                        label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                                        label.Text = "🧟 " .. obj.Name
+                                        label.TextColor3 = Color3.fromRGB(255, 100, 0)
+                                        label.TextScaled = true
+                                        label.Font = Enum.Font.GothamBold
+                                        label.Parent = billboard
+                                        
+                                        local corner = Instance.new("UICorner")
+                                        corner.CornerRadius = UDim.new(0, 6)
+                                        corner.Parent = label
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                end
+                wait(2)
+            end
+        end)
+        
+        spawn(function()
+            while features.zombieESP do
+                local char = getCharacter()
+                if char then
+                    local rootPart = char:FindFirstChild("HumanoidRootPart")
+                    pcall(function()
+                        for _, obj in pairs(zombieESPObjects) do
+                            if obj and obj.Parent and obj.Name == "ZombieESP_L" then
+                                local label = obj:FindFirstChildOfClass("TextLabel")
+                                local parent = obj.Parent
+                                if label and parent and parent:IsA("BasePart") and rootPart then
+                                    local dist = math.floor((parent.Position - rootPart.Position).Magnitude)
+                                    local modelName = parent.Parent and parent.Parent.Name or "Zombie"
+                                    label.Text = "🧟 " .. modelName .. " [" .. dist .. "m]"
+                                end
+                            end
+                        end
+                    end)
+                end
+                wait(0.5)
+            end
+        end)
+    else
+        btn.Text = "🧟 Zombie ESP: OFF"
+        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        
+        for _, obj in pairs(zombieESPObjects) do
+            if obj and obj.Parent then obj:Destroy() end
+        end
+        zombieESPObjects = {}
+        
+        pcall(function()
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj.Name == "ZombieESP_H" or obj.Name == "ZombieESP_L" then
+                    obj:Destroy()
+                end
+            end
+        end)
+    end
+end)
+
+-- Vehicle ESP
+createButton("🚗 Vehicle ESP: OFF", function(btn)
+    features.vehicleESP = not features.vehicleESP
+    if features.vehicleESP then
+        btn.Text = "🚗 Vehicle ESP: ON"
+        btn.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+        
+        spawn(function()
+            while features.vehicleESP do
+                pcall(function()
+                    for _, obj in pairs(Workspace:GetDescendants()) do
+                        if obj:IsA("VehicleSeat") and not obj:FindFirstChild("VehicleESP_L") then
+                            local vehicle = obj.Parent
+                            if vehicle and vehicle:IsA("Model") then
+                                local vehicleName = vehicle.Name
+                                if vehicleName == "Seats" or vehicleName == "Parts" then
+                                    if vehicle.Parent and vehicle.Parent:IsA("Model") then
+                                        vehicleName = vehicle.Parent.Name
+                                    end
+                                end
+                                
+                                if not vehicle:FindFirstChild("VehicleESP_H") then
+                                    local highlight = Instance.new("Highlight")
+                                    highlight.Name = "VehicleESP_H"
+                                    highlight.FillColor = Color3.fromRGB(0, 255, 0)
+                                    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                                    highlight.FillTransparency = 0.5
+                                    highlight.OutlineTransparency = 0
+                                    highlight.Parent = vehicle
+                                    table.insert(vehicleESPObjects, highlight)
+                                end
+                                
+                                local billboard = Instance.new("BillboardGui")
+                                billboard.Name = "VehicleESP_L"
+                                billboard.Size = UDim2.new(0, 150, 0, 50)
+                                billboard.StudsOffset = Vector3.new(0, 5, 0)
+                                billboard.AlwaysOnTop = true
+                                billboard.Parent = obj
+                                table.insert(vehicleESPObjects, billboard)
+                                
+                                local label = Instance.new("TextLabel")
+                                label.Size = UDim2.new(1, 0, 1, 0)
+                                label.BackgroundTransparency = 0.3
+                                label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                                label.Text = "🚗 " .. vehicleName
+                                label.TextColor3 = Color3.fromRGB(0, 255, 0)
+                                label.TextScaled = true
+                                label.Font = Enum.Font.GothamBold
+                                label.Parent = billboard
+                                
+                                local corner = Instance.new("UICorner")
+                                corner.CornerRadius = UDim.new(0, 6)
+                                corner.Parent = label
+                            end
+                        end
+                    end
+                end)
+                wait(3)
+            end
+        end)
+        
+        spawn(function()
+            while features.vehicleESP do
+                local char = getCharacter()
+                if char then
+                    local rootPart = char:FindFirstChild("HumanoidRootPart")
+                    pcall(function()
+                        for _, obj in pairs(vehicleESPObjects) do
+                            if obj and obj.Parent and obj.Name == "VehicleESP_L" then
+                                local label = obj:FindFirstChildOfClass("TextLabel")
+                                local seat = obj.Parent
+                                if label and seat and seat:IsA("BasePart") and rootPart then
+                                    local dist = math.floor((seat.Position - rootPart.Position).Magnitude)
+                                    local vehicle = seat.Parent
+                                    local vehicleName = vehicle and vehicle.Name or "Vehicle"
+                                    if vehicleName == "Seats" or vehicleName == "Parts" then
+                                        if vehicle.Parent and vehicle.Parent:IsA("Model") then
+                                            vehicleName = vehicle.Parent.Name
+                                        end
+                                    end
+                                    label.Text = "🚗 " .. vehicleName .. " [" .. dist .. "m]"
+                                end
+                            end
+                        end
+                    end)
+                end
+                wait(1)
+            end
+        end)
+    else
+        btn.Text = "🚗 Vehicle ESP: OFF"
+        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        
+        for _, obj in pairs(vehicleESPObjects) do
+            if obj and obj.Parent then obj:Destroy() end
+        end
+        vehicleESPObjects = {}
+        
+        pcall(function()
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj.Name == "VehicleESP_H" or obj.Name == "VehicleESP_L" then
+                    obj:Destroy()
+                end
+            end
+        end)
+    end
+end)
+
+-- Container ESP
+createButton("📦 Container ESP: OFF", function(btn)
+    features.containerESP = not features.containerESP
+    if features.containerESP then
+        btn.Text = "📦 Container ESP: ON"
+        btn.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+        
+        spawn(function()
+            while features.containerESP do
+                pcall(function()
+                    for _, obj in pairs(Workspace:GetDescendants()) do
+                        if not obj:IsA("Model") or obj:FindFirstChild("ContainerESP_L") then
+                            continue
+                        end
+                        
+                        local name = obj.Name:lower()
+                        
+                        -- STRICT EXCLUSIONS - Exclude non-lootable objects
+                        local isExcluded = name:find("hitbox") or name:find("collision") or 
+                                          name:find("trigger") or name:find("zone") or
+                                          name:find("effect") or name:find("particle") or
+                                          name:find("engine") or name:find("wheel") or
+                                          name:find("seat") or name:find("window") or
+                                          name:find("door") or name:find("spawn") or
+                                          name:find("mailbox") or name:find("mail") or
+                                          name:find("sign") or name:find("post") or
+                                          name:find("pole") or name:find("fence")
+                        
+                        if isExcluded or isPartOfPlayer(obj) then
+                            continue
+                        end
+                        
+                        -- IMPORTANT: Check if it's actually a lootable container
+                        -- AR2 loot containers have "Interact Point" and NumberValue children
+                        if not isLootableContainer(obj) then
+                            continue
+                        end
+                        
+                        local targetPart = obj.PrimaryPart or obj:FindFirstChild("Interact Point") or obj:FindFirstChildWhichIsA("BasePart", true)
+                        
+                        if targetPart and targetPart:IsA("BasePart") then
+                            local hasLoot, itemCount = checkContainerContents(obj)
+                            
+                            local fillColor, outlineColor, textColor, statusEmoji, statusText
+                            
+                            if hasLoot == nil then
+                                fillColor = Color3.fromRGB(255, 255, 0)
+                                outlineColor = Color3.fromRGB(255, 165, 0)
+                                textColor = Color3.fromRGB(255, 255, 0)
+                                statusEmoji = "❓"
+                                statusText = "[UNKNOWN]"
+                            elseif hasLoot then
+                                fillColor = Color3.fromRGB(0, 255, 0)
+                                outlineColor = Color3.fromRGB(0, 200, 0)
+                                textColor = Color3.fromRGB(0, 255, 0)
+                                statusEmoji = "✅"
+                                statusText = "[" .. itemCount .. " ITEMS]"
+                            else
+                                fillColor = Color3.fromRGB(255, 50, 50)
+                                outlineColor = Color3.fromRGB(200, 0, 0)
+                                textColor = Color3.fromRGB(255, 50, 50)
+                                statusEmoji = "❌"
+                                statusText = "[EMPTY]"
+                            end
+                            
+                            local highlight = Instance.new("Highlight")
+                            highlight.Name = "ContainerESP_H"
+                            highlight.FillColor = fillColor
+                            highlight.OutlineColor = outlineColor
+                            highlight.FillTransparency = 0.5
+                            highlight.OutlineTransparency = 0
+                            highlight.Parent = obj
+                            table.insert(containerESPObjects, highlight)
+                            
+                            local billboard = Instance.new("BillboardGui")
+                            billboard.Name = "ContainerESP_L"
+                            billboard.Size = UDim2.new(0, 180, 0, 50)
+                            billboard.StudsOffset = Vector3.new(0, 3, 0)
+                            billboard.AlwaysOnTop = true
+                            billboard.Parent = targetPart
+                            table.insert(containerESPObjects, billboard)
+                            
+                            local label = Instance.new("TextLabel")
+                            label.Size = UDim2.new(1, 0, 1, 0)
+                            label.BackgroundTransparency = 0.3
+                            label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                            
+                            local displayName = obj.Name:gsub("LootGroup", ""):gsub("Detail", ""):gsub("Core", ""):gsub("_", " "):gsub("^%s*(.-)%s*$", "%1")
+                            if displayName == "" then displayName = "Container" end
+                            
+                            label.Text = statusEmoji .. " " .. displayName .. " " .. statusText
+                            label.TextColor3 = textColor
+                            label.TextScaled = true
+                            label.Font = Enum.Font.GothamBold
+                            label.Parent = billboard
+                            
+                            local corner = Instance.new("UICorner")
+                            corner.CornerRadius = UDim.new(0, 6)
+                            corner.Parent = label
+                            
+                            if features.debugMode then
+                                print("Added ESP to lootable container: " .. obj.Name .. " | Items: " .. itemCount)
+                            end
+                        end
+                    end
+                end)
+                wait(5)
+            end
+        end)
+        
+        spawn(function()
+            while features.containerESP do
+                local char = getCharacter()
+                if char then
+                    local rootPart = char:FindFirstChild("HumanoidRootPart")
+                    pcall(function()
+                        for _, obj in pairs(containerESPObjects) do
+                            if obj and obj.Parent and obj.Name == "ContainerESP_L" then
+                                local label = obj:FindFirstChildOfClass("TextLabel")
+                                local parent = obj.Parent
+                                if label and parent and parent:IsA("BasePart") and rootPart then
+                                    local dist = math.floor((parent.Position - rootPart.Position).Magnitude)
+                                    local containerObj = parent.Parent or parent
+                                    
+                                    local hasLoot, itemCount = checkContainerContents(containerObj)
+                                    
+                                    local statusEmoji, statusText, textColor
+                                    if hasLoot == nil then
+                                        statusEmoji, statusText, textColor = "❓", "[UNKNOWN]", Color3.fromRGB(255, 255, 0)
+                                    elseif hasLoot then
+                                        statusEmoji = "✅"
+                                        statusText = itemCount > 0 and "[" .. itemCount .. " ITEMS]" or "[LOOT]"
+                                        textColor = Color3.fromRGB(0, 255, 0)
+                                    else
+                                        statusEmoji, statusText, textColor = "❌", "[EMPTY]", Color3.fromRGB(255, 50, 50)
+                                    end
+                                    
+                                    local displayName = containerObj.Name:gsub("LootGroup", ""):gsub("Detail", ""):gsub("Core", ""):gsub("_", " "):gsub("^%s*(.-)%s*$", "%1")
+                                    if displayName == "" then displayName = "Container" end
+                                    
+                                    label.Text = statusEmoji .. " " .. displayName .. " " .. statusText .. " [" .. dist .. "m]"
+                                    label.TextColor3 = textColor
+                                end
+                            end
+                        end
+                    end)
+                end
+                wait(1)
+            end
+        end)
+    else
+        btn.Text = "📦 Container ESP: OFF"
+        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        
+        for _, obj in pairs(containerESPObjects) do
+            if obj and obj.Parent then obj:Destroy() end
+        end
+        containerESPObjects = {}
+        
+        pcall(function()
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj.Name == "ContainerESP_H" or obj.Name == "ContainerESP_L" then
+                    obj:Destroy()
+                end
+            end
+        end)
+    end
+end)
+
+-- Clear All ESP
+createButton("🗑️ Clear All ESP", function(btn)
+    for _, obj in pairs(zombieESPObjects) do
+        if obj and obj.Parent then obj:Destroy() end
+    end
+    for _, obj in pairs(vehicleESPObjects) do
+        if obj and obj.Parent then obj:Destroy() end
+    end
+    for _, obj in pairs(containerESPObjects) do
+        if obj and obj.Parent then obj:Destroy() end
+    end
+    
+    zombieESPObjects = {}
+    vehicleESPObjects = {}
+    containerESPObjects = {}
+    
+    pcall(function()
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj.Name:find("ESP_") then
+                obj:Destroy()
+            end
+        end
+    end)
+    
+    btn.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+    wait(0.5)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+end)
+
+-- Debug Mode
+createButton("🔍 Debug Mode: OFF", function(btn)
+    features.debugMode = not features.debugMode
+    if features.debugMode then
+        btn.Text = "🔍 Debug Mode: ON"
+        btn.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+        print("=== DEBUG MODE ENABLED ===")
+        
+        spawn(function()
+            wait(1)
+            print("\n=== SCANNING FOR CONTAINERS ===")
+            local containerCount = 0
+            
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if not obj:IsA("Model") then continue end
+                
+                local name = obj.Name:lower()
+                
+                if name:find("hitbox") or name:find("collision") or name:find("engine") then continue end
+                
+                if name:find("container") or name:find("crate") or 
+                   name:find("tent") or name:find("military") or 
+                   name:find("supply") or name:find("box") or 
+                   name:find("chest") or name:find("locker") then
+                    
+                    containerCount = containerCount + 1
+                    if containerCount <= 15 then
+                        print("\n--- Container #" .. containerCount .. ": " .. obj.Name .. " ---")
+                        print("Children (" .. #obj:GetChildren() .. "):")
+                        for i, child in pairs(obj:GetChildren()) do
+                            if i <= 8 then
+                                print("  - " .. child.Name .. " (" .. child.ClassName .. ")")
+                            end
+                        end
+                        
+                        local valueObjects = {}
+                        for _, desc in pairs(obj:GetDescendants()) do
+                            if desc:IsA("IntValue") or desc:IsA("BoolValue") or 
+                               desc:IsA("StringValue") or desc:IsA("NumberValue") then
+                                table.insert(valueObjects, desc.Name .. " = " .. tostring(desc.Value))
+                            end
+                        end
+                        
+                        if #valueObjects > 0 then
+                            print("Value Objects:")
+                            for i, vo in pairs(valueObjects) do
+                                if i <= 8 then print("  - " .. vo) end
+                            end
+                        else
+                            print("Value Objects: None")
+                        end
+                        
+                        local hasClick = obj:FindFirstChildOfClass("ClickDetector", true)
+                        local hasProx = obj:FindFirstChildOfClass("ProximityPrompt", true)
+                        print("Has ClickDetector: " .. tostring(hasClick ~= nil))
+                        print("Has ProximityPrompt: " .. tostring(hasProx ~= nil))
+                    end
+                end
+            end
+            
+            print("\n=== SCAN COMPLETE ===")
+            print("Total containers found: " .. containerCount)
+            if containerCount > 15 then
+                print("(Showing first 15 only)")
+            end
+        end)
+    else
+        btn.Text = "🔍 Debug Mode: OFF"
+        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        print("=== DEBUG MODE DISABLED ===")
+    end
+end)
+
+print("✓ Apocalypse Rising 2 ESP+ Loaded!")
+print("🧟 Zombie ESP - Shows zombies with names and distance")
+print("🚗 Vehicle ESP - Shows vehicles with names and distance")
+print("📦 Container ESP - Shows containers with loot status and distance")
+print("✅ Green = Has Loot | ❌ Red = Empty | ❓ Yellow = Unknown")
+print("🔍 Use Debug Mode to see container structure in console (F9)")
